@@ -1,0 +1,12 @@
+{
+  "telegram_bot_token": "PASTE_YOUR_BOT_TOKEN_HERE",
+  "telegram_chat_id": "PASTE_YOUR_CHAT_ID_HERE",
+  "enabled": true,
+  "min_severity": "WARNING",
+  "cooldown_seconds": 300,
+  "log_file": "logs/verit_alerts.log",
+  "log_max_bytes": 10485760,
+  "log_backup_count": 5,
+  "telegram_min_interval_seconds": 1.0,
+  "telegram_max_retries": 3
+}

@@ -15,3 +15,14 @@ __pycache__/
 # Ignore IDE / Editor configs
 .vscode/
 .idea/
+
+# Exclude large CSV files and datasets
+*.csv
+features/
+Database/
+
+# Exclude model artifacts / data models
+*.joblib
+*.pkl
+*.h5
+*.onnx
