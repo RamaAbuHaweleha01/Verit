@@ -21,6 +21,7 @@ the autoencoder is comprehensive (trained only on "normal") but noisier
 and unable to name what it's seeing.
 """
 
+import signal
 import time
 
 import numpy as np
@@ -32,10 +33,14 @@ from models.xgboost_classifier import XGBoostAttackClassifier
 from models.autoencoder import AutoencoderAnomalyDetector
 
 # columns carried through from the raw (pre-scaling) flow row into alerts,
-# when present -- gives the admin actual context, not just a verdict
+# when present -- gives the admin actual context, not just a verdict.
+# NOTE: these are the exact CICFlowMeter/CICIDS2017 column names produced
+# by flow_extractor.py -- keep this in sync if that schema changes again.
 _ALERT_CONTEXT_COLUMNS = [
-    "flow_duration", "total_fwd_packets", "total_bwd_packets",
-    "total_fwd_bytes", "total_bwd_bytes",
+    "protocol", "Flow Duration", "Total Fwd Packets", "Total Backward Packets",
+    "Total Length of Fwd Packets", "Total Length of Bwd Packets",
+    "Init_Win_bytes_forward", "Init_Win_bytes_backward",
+    "FIN Flag Count", "SYN Flag Count", "RST Flag Count", "ACK Flag Count",
 ]
 
 
@@ -43,7 +48,7 @@ class HybridNIDS:
     def __init__(self, processor: FeatureProcessor, xgb_model: XGBoostAttackClassifier,
                  autoencoder: AutoencoderAnomalyDetector = None, benign_label="BENIGN",
                  xgb_confidence_threshold=0.6, high_confidence_threshold=0.9,
-                 alert_manager=None):
+                 alert_manager=None, event_bus=None):
         self.processor = processor
         self.xgb = xgb_model
         self.ae = autoencoder
@@ -51,6 +56,10 @@ class HybridNIDS:
         self.xgb_confidence_threshold = xgb_confidence_threshold
         self.high_confidence_threshold = high_confidence_threshold
         self.alerts = alert_manager
+        # event_bus: optional dashboard.event_bus.EventBus -- when set,
+        # EVERY flow result (not just non-benign ones, unlike alert_manager)
+        # is published for the live web dashboard to display.
+        self.event_bus = event_bus
         self._warned_missing_columns = False
 
     # -- core combiner -------------------------------------------------------
@@ -115,17 +124,24 @@ class HybridNIDS:
 
     def process_and_alert(self, raw_df: pd.DataFrame) -> pd.DataFrame:
         results = self.predict_batch(raw_df)
-        if results.empty or self.alerts is None:
+        if results.empty:
             return results
 
-        for _, row in results.iterrows():
-            if row["verdict"] == self.benign_label:
-                continue  # INFO-level benign rows are noisy; skip unless you want full audit logging of every flow
-            flow = row.to_dict()
-            self.alerts.alert(
-                flow=flow, verdict=row["verdict"], source=row["source"],
-                severity=row["severity"], score=row["score"],
-            )
+        if self.event_bus is not None:
+            # every flow, including BENIGN -- the dashboard shows the full
+            # traffic picture, not just alerts
+            for _, row in results.iterrows():
+                self.event_bus.publish(row.to_dict())
+
+        if self.alerts is not None:
+            for _, row in results.iterrows():
+                if row["verdict"] == self.benign_label:
+                    continue  # INFO-level benign rows are noisy; skip unless you want full audit logging of every flow
+                flow = row.to_dict()
+                self.alerts.alert(
+                    flow=flow, verdict=row["verdict"], source=row["source"],
+                    severity=row["severity"], score=row["score"],
+                )
         return results
 
     def _warn_if_schema_mismatch(self, raw_df):
@@ -153,9 +169,17 @@ class HybridNIDS:
     def run_live(self, interface, local_ips=None, bpf_filter=None, idle_timeout=120,
                  flush_interval=10, validate_checksums=True, checksum_direction="inbound",
                  verbose=True):
-        """Continuously captures on `interface`, builds flows, and runs them
-        through the hybrid detector + alert manager every `flush_interval`
-        seconds. Blocks until Ctrl+C."""
+        """Continuously captures on `interface` -- a single interface name,
+        OR a list of names to monitor simultaneously (e.g. ["enp0s3",
+        "enp0s8"]) -- builds flows, and runs them through the hybrid
+        detector + alert manager every `flush_interval` seconds. Blocks
+        until Ctrl+C (SIGINT) or a service stop (SIGTERM); both trigger
+        the same graceful shutdown: flush whatever's still open, score it,
+        and exit cleanly -- important under systemd, which sends SIGTERM
+        on `systemctl stop` and escalates to SIGKILL if the process
+        doesn't exit within its configured timeout."""
+        interfaces = [interface] if isinstance(interface, str) else list(interface)
+
         cleaner = PacketCleaner(
             validate_checksums=validate_checksums,
             validate_checksum_direction=checksum_direction,
@@ -163,37 +187,61 @@ class HybridNIDS:
         )
         extractor = FlowExtractor(idle_timeout=idle_timeout)
 
-        print(f"[*] Live detection starting on interface '{interface}' "
+        shutdown = {"requested": False}
+
+        def _handle_shutdown_signal(signum, frame):
+            name = signal.Signals(signum).name
+            print(f"\n[*] Received {name}, shutting down gracefully...")
+            shutdown["requested"] = True
+
+        # SIGTERM must be handled explicitly -- unlike SIGINT, Python does
+        # NOT turn it into a catchable KeyboardInterrupt by default, so
+        # without this a systemd `stop` would just kill the process mid-
+        # capture with no flush and no clean log line.
+        prev_sigterm = signal.signal(signal.SIGTERM, _handle_shutdown_signal)
+        prev_sigint = signal.signal(signal.SIGINT, _handle_shutdown_signal)
+
+        print(f"[*] Live detection starting on interface(s): {', '.join(interfaces)} "
               f"(flushing flows every {flush_interval}s, idle_timeout={idle_timeout}s)")
-        print("[*] Press Ctrl+C to stop.\n")
+        print("[*] Press Ctrl+C to stop (or `systemctl stop` if running as a service).\n")
 
         try:
-            while True:
-                packets = sniff(iface=interface, timeout=flush_interval, filter=bpf_filter, store=True)
-                if packets:
-                    cleaned = list(cleaner.clean(packets))
-                    extractor.process(cleaned)
+            try:
+                while not shutdown["requested"]:
+                    packets = sniff(iface=interfaces, timeout=flush_interval, filter=bpf_filter, store=True)
+                    if packets:
+                        cleaned = list(cleaner.clean(packets))
+                        extractor.process(cleaned)
 
-                extractor.sweep_idle_flows()
-                new_flows = extractor.drain_completed()
+                    extractor.sweep_idle_flows()
+                    new_flows = extractor.drain_completed()
 
-                if not new_flows.empty:
-                    results = self.process_and_alert(new_flows)
-                    if verbose:
-                        self._print_live_summary(results)
-                elif verbose:
-                    print(f"[{time.strftime('%H:%M:%S')}] No completed flows this interval "
-                          f"({cleaner.stats.kept} packets kept so far).")
+                    if not new_flows.empty:
+                        results = self.process_and_alert(new_flows)
+                        if verbose:
+                            self._print_live_summary(results)
+                    elif verbose:
+                        print(f"[{time.strftime('%H:%M:%S')}] No completed flows this interval "
+                              f"({cleaner.stats.kept} packets kept so far).")
+            finally:
+                signal.signal(signal.SIGTERM, prev_sigterm)
+                signal.signal(signal.SIGINT, prev_sigint)
 
+                print("\n[*] Stopping -- flushing remaining active flows...")
+                extractor.flush_all()
+                remaining = extractor.drain_completed()
+                if not remaining.empty:
+                    results = self.process_and_alert(remaining)
+                    self._print_live_summary(results)
+                print(cleaner.stats.summary())
+                print("[*] Live detection stopped.")
         except KeyboardInterrupt:
-            print("\n[*] Stopping -- flushing remaining active flows...")
-            extractor.flush_all()
-            remaining = extractor.drain_completed()
-            if not remaining.empty:
-                results = self.process_and_alert(remaining)
-                self._print_live_summary(results)
-            print(cleaner.stats.summary())
-            print("[*] Live detection stopped.")
+            # Belt-and-suspenders: normally SIGINT is intercepted by the
+            # handler installed above and never reaches here as an actual
+            # exception. This just guarantees a clean exit (not a
+            # traceback) even in an unusual embedding/testing context
+            # where a raw KeyboardInterrupt reaches this frame directly.
+            pass
 
     @staticmethod
     def _print_live_summary(results: pd.DataFrame):

@@ -1,0 +1,461 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Verit — Live Traffic Monitor</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
+<style>
+  :root {
+    --bg: #e9ebee;
+    --panel: #f5f6f8;
+    --ink: #1b1e24;
+    --ink-dim: #5a6070;
+    --line: #c7cbd3;
+    --line-strong: #9aa0ac;
+    --blue: #2b6cb0;
+    --blue-dim: #dbe6f2;
+    --amber: #b5730a;
+    --amber-dim: #f3e3c8;
+    --red: #b3261e;
+    --red-dim: #f5d9d6;
+    --mono: 'IBM Plex Mono', ui-monospace, monospace;
+    --sans: 'IBM Plex Sans', system-ui, sans-serif;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 14px;
+    line-height: 1.45;
+  }
+
+  header {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    padding: 18px 24px 14px;
+    border-bottom: 1px solid var(--line-strong);
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+
+  header .brand {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+  }
+
+  header h1 {
+    font-size: 18px;
+    font-weight: 600;
+    margin: 0;
+    letter-spacing: -0.01em;
+  }
+
+  header .subtitle {
+    color: var(--ink-dim);
+    font-size: 13px;
+  }
+
+  .status-line {
+    display: flex;
+    align-items: center;
+    gap: 18px;
+    font-family: var(--mono);
+    font-size: 12.5px;
+    color: var(--ink-dim);
+  }
+
+  .status-line .dot {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--line-strong);
+    margin-right: 6px;
+    position: relative;
+    top: -1px;
+  }
+
+  .status-line .dot.live {
+    background: var(--blue);
+    box-shadow: 0 0 0 3px var(--blue-dim);
+  }
+
+  main {
+    padding: 20px 24px 40px;
+    max-width: 1280px;
+    margin: 0 auto;
+  }
+
+  .meters {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 1px;
+    background: var(--line-strong);
+    border: 1px solid var(--line-strong);
+    margin-bottom: 20px;
+  }
+
+  .meter {
+    background: var(--panel);
+    padding: 14px 16px;
+  }
+
+  .meter .label {
+    font-size: 12px;
+    color: var(--ink-dim);
+    margin-bottom: 8px;
+  }
+
+  .meter .value {
+    font-family: var(--mono);
+    font-size: 28px;
+    font-weight: 500;
+    line-height: 1;
+  }
+
+  .meter.benign .value { color: var(--blue); }
+  .meter.attack .value { color: var(--amber); }
+  .meter.zeroday .value { color: var(--red); }
+
+  section {
+    margin-bottom: 22px;
+  }
+
+  section > h2 {
+    font-size: 12.5px;
+    font-weight: 500;
+    color: var(--ink-dim);
+    margin: 0 0 8px 2px;
+  }
+
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--line-strong);
+  }
+
+  .chart-panel {
+    padding: 14px 16px 10px;
+    height: 180px;
+  }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-family: var(--mono);
+    font-size: 12.5px;
+  }
+
+  thead th {
+    text-align: left;
+    font-family: var(--sans);
+    font-weight: 500;
+    font-size: 11.5px;
+    color: var(--ink-dim);
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--line-strong);
+    position: sticky;
+    top: 0;
+    background: var(--panel);
+  }
+
+  tbody td {
+    padding: 6px 12px;
+    border-bottom: 1px solid var(--line);
+    white-space: nowrap;
+  }
+
+  tbody tr {
+    transition: background-color 1.2s ease;
+  }
+
+  tbody tr.flash {
+    background-color: var(--blue-dim);
+    transition: background-color 0s;
+  }
+
+  .table-scroll {
+    max-height: 460px;
+    overflow-y: auto;
+  }
+
+  .badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 2px;
+    font-size: 11.5px;
+    font-weight: 500;
+    border: 1px solid transparent;
+  }
+
+  .badge.benign { color: #1a4a80; background: var(--blue-dim); border-color: #b7cde6; }
+  .badge.attack { color: #7a4a06; background: var(--amber-dim); border-color: #e0c088; }
+  .badge.zeroday { color: #7a1a15; background: var(--red-dim); border-color: #e0b0ab; }
+
+  .empty-state {
+    padding: 40px 20px;
+    text-align: center;
+    color: var(--ink-dim);
+    font-size: 13px;
+  }
+
+  ::-webkit-scrollbar { width: 10px; }
+  ::-webkit-scrollbar-track { background: var(--panel); }
+  ::-webkit-scrollbar-thumb { background: var(--line-strong); }
+
+  @media (max-width: 700px) {
+    .meters { grid-template-columns: repeat(2, 1fr); }
+    .table-scroll { overflow-x: auto; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="brand">
+    <h1>Verit</h1>
+    <span class="subtitle">Live traffic monitor</span>
+  </div>
+  <div class="status-line">
+    <span><span class="dot" id="connDot"></span><span id="connLabel">Connecting…</span></span>
+    <span id="uptimeLabel">Uptime —</span>
+    <span id="clientsLabel">—</span>
+  </div>
+</header>
+
+<main>
+  <div class="meters">
+    <div class="meter">
+      <div class="label">Flows observed</div>
+      <div class="value" id="mTotal">0</div>
+    </div>
+    <div class="meter benign">
+      <div class="label">Benign</div>
+      <div class="value" id="mBenign">0</div>
+    </div>
+    <div class="meter attack">
+      <div class="label">Known attacks</div>
+      <div class="value" id="mAttack">0</div>
+    </div>
+    <div class="meter zeroday">
+      <div class="label">Zero-day suspected</div>
+      <div class="value" id="mZeroday">0</div>
+    </div>
+  </div>
+
+  <section>
+    <h2>Classification rate — last 5 minutes</h2>
+    <div class="panel chart-panel">
+      <canvas id="rateChart"></canvas>
+    </div>
+  </section>
+
+  <section>
+    <h2>Flow log</h2>
+    <div class="panel">
+      <div class="table-scroll" id="tableScroll">
+        <table>
+          <thead>
+            <tr>
+              <th>Time</th>
+              <th>Source</th>
+              <th>Destination</th>
+              <th>Proto</th>
+              <th>Verdict</th>
+              <th>Model</th>
+              <th>Score</th>
+            </tr>
+          </thead>
+          <tbody id="flowBody"></tbody>
+        </table>
+        <div class="empty-state" id="emptyState">No flows yet — waiting for traffic.</div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<script>
+const PROTO_NAMES = { 6: "TCP", 17: "UDP", 1: "ICMP" };
+
+function verdictClass(verdict) {
+  if (verdict === "BENIGN") return "benign";
+  if (verdict === "ZERO_DAY_SUSPECTED") return "zeroday";
+  return "attack";
+}
+
+function fmtTime(epochSeconds) {
+  const d = new Date(epochSeconds * 1000);
+  return d.toLocaleTimeString([], { hour12: false });
+}
+
+function fmtUptime(seconds) {
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const s = Math.floor(seconds % 60);
+  return `Uptime ${h}h ${m}m ${s}s`;
+}
+
+function fmtScore(row) {
+  if (row.score === null || row.score === undefined) return "—";
+  return Number(row.score).toFixed(3);
+}
+
+function addressCell(ip, port) {
+  if (ip === null || ip === undefined) return "—";
+  return port !== null && port !== undefined ? `${ip}:${port}` : ip;
+}
+
+const flowBody = document.getElementById("flowBody");
+const emptyState = document.getElementById("emptyState");
+const tableScroll = document.getElementById("tableScroll");
+const MAX_ROWS = 150;
+
+function prependRow(row, animate) {
+  emptyState.style.display = "none";
+  const tr = document.createElement("tr");
+  const vClass = verdictClass(row.verdict);
+  const proto = PROTO_NAMES[row.protocol] || (row.protocol ?? "—");
+  tr.innerHTML = `
+    <td>${fmtTime(row.received_at || Date.now() / 1000)}</td>
+    <td>${addressCell(row.src_ip, row.src_port)}</td>
+    <td>${addressCell(row.dst_ip, row.dst_port)}</td>
+    <td>${proto}</td>
+    <td><span class="badge ${vClass}">${row.verdict ?? "—"}</span></td>
+    <td>${row.source ?? "—"}</td>
+    <td>${fmtScore(row)}</td>
+  `;
+  if (animate) tr.classList.add("flash");
+  flowBody.insertBefore(tr, flowBody.firstChild);
+  while (flowBody.children.length > MAX_ROWS) {
+    flowBody.removeChild(flowBody.lastChild);
+  }
+  if (animate) {
+    requestAnimationFrame(() => requestAnimationFrame(() => tr.classList.remove("flash")));
+  }
+}
+
+// -- rolling rate chart: bucket incoming events into 10s windows --
+const BUCKET_SECONDS = 10;
+const WINDOW_BUCKETS = 30; // 5 minutes
+
+const chartCtx = document.getElementById("rateChart").getContext("2d");
+const rateChart = new Chart(chartCtx, {
+  type: "line",
+  data: {
+    labels: [],
+    datasets: [
+      { label: "Benign", data: [], borderColor: "#2b6cb0", backgroundColor: "rgba(43,108,176,0.08)", fill: true, tension: 0.25, pointRadius: 0, borderWidth: 1.5 },
+      { label: "Known attack", data: [], borderColor: "#b5730a", backgroundColor: "rgba(181,115,10,0.08)", fill: true, tension: 0.25, pointRadius: 0, borderWidth: 1.5 },
+      { label: "Zero-day", data: [], borderColor: "#b3261e", backgroundColor: "rgba(179,38,30,0.08)", fill: true, tension: 0.25, pointRadius: 0, borderWidth: 1.5 },
+    ],
+  },
+  options: {
+    responsive: true,
+    maintainAspectRatio: false,
+    animation: false,
+    interaction: { mode: "index", intersect: false },
+    scales: {
+      x: { grid: { display: false }, ticks: { font: { family: "IBM Plex Mono", size: 10 }, maxTicksLimit: 8 } },
+      y: { beginAtZero: true, grid: { color: "#dcdfe4" }, ticks: { font: { family: "IBM Plex Mono", size: 10 }, precision: 0 } },
+    },
+    plugins: {
+      legend: { position: "top", align: "end", labels: { boxWidth: 10, font: { family: "IBM Plex Sans", size: 11 } } },
+    },
+  },
+});
+
+let buckets = []; // { t, benign, attack, zeroday }
+
+function currentBucketKey(epochSeconds) {
+  return Math.floor(epochSeconds / BUCKET_SECONDS) * BUCKET_SECONDS;
+}
+
+function recordInChart(row) {
+  const t = currentBucketKey(row.received_at || Date.now() / 1000);
+  let bucket = buckets.find(b => b.t === t);
+  if (!bucket) {
+    bucket = { t, benign: 0, attack: 0, zeroday: 0 };
+    buckets.push(bucket);
+    buckets.sort((a, b) => a.t - b.t);
+    if (buckets.length > WINDOW_BUCKETS) buckets = buckets.slice(-WINDOW_BUCKETS);
+  }
+  const cls = verdictClass(row.verdict);
+  if (cls === "benign") bucket.benign++;
+  else if (cls === "zeroday") bucket.zeroday++;
+  else bucket.attack++;
+}
+
+function redrawChart() {
+  rateChart.data.labels = buckets.map(b => fmtTime(b.t));
+  rateChart.data.datasets[0].data = buckets.map(b => b.benign);
+  rateChart.data.datasets[1].data = buckets.map(b => b.attack);
+  rateChart.data.datasets[2].data = buckets.map(b => b.zeroday);
+  rateChart.update("none");
+}
+setInterval(redrawChart, 2000);
+
+// -- badges --
+function updateStats(stats) {
+  document.getElementById("mTotal").textContent = stats.total_flows ?? 0;
+  document.getElementById("mBenign").textContent = stats.benign ?? 0;
+  document.getElementById("mAttack").textContent = stats.known_attacks ?? 0;
+  document.getElementById("mZeroday").textContent = stats.zero_day ?? 0;
+  document.getElementById("uptimeLabel").textContent = fmtUptime(stats.uptime_seconds ?? 0);
+  document.getElementById("clientsLabel").textContent =
+    `${stats.connected_clients ?? 0} viewer${stats.connected_clients === 1 ? "" : "s"}`;
+}
+
+// -- bootstrap: pull current state, then subscribe to the live stream --
+async function bootstrap() {
+  try {
+    const [statsRes, recentRes] = await Promise.all([
+      fetch("/api/stats"), fetch("/api/recent"),
+    ]);
+    updateStats(await statsRes.json());
+    const recent = await recentRes.json();
+    recent.forEach(row => { recordInChart(row); });
+    recent.slice(-MAX_ROWS).reverse().forEach(row => prependRow(row, false));
+    redrawChart();
+  } catch (e) {
+    console.error("Initial load failed", e);
+  }
+}
+
+function connectStream() {
+  const dot = document.getElementById("connDot");
+  const label = document.getElementById("connLabel");
+  const source = new EventSource("/api/stream");
+
+  source.onopen = () => {
+    dot.classList.add("live");
+    label.textContent = "Live";
+  };
+  source.onerror = () => {
+    dot.classList.remove("live");
+    label.textContent = "Reconnecting…";
+  };
+  source.onmessage = (e) => {
+    const row = JSON.parse(e.data);
+    prependRow(row, true);
+    recordInChart(row);
+  };
+}
+
+let statsPollTimer = setInterval(async () => {
+  try { updateStats(await (await fetch("/api/stats")).json()); } catch (e) {}
+}, 4000);
+
+bootstrap().then(connectStream);
+</script>
+
+</body>
+</html>

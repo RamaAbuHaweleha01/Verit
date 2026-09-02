@@ -12,16 +12,21 @@ through extract_features.py --raw-out):
     python3 hybrid_detect.py --mode batch --input flows_raw.csv \
         --artifacts-dir models/artifacts --out detections.csv
 
-Usage (live mode -- continuous detection on a NIC):
-    sudo python3 hybrid_detect.py --mode live --interface enp0s3 \
+Usage (live mode -- continuous detection on a NIC, with the live dashboard
+at http://localhost:8080 by default):
+    sudo python3 hybrid_detect.py --mode live --interface enp0s3,enp0s8 \
         --artifacts-dir models/artifacts
 
-    # or let it auto-detect the first active interface:
+    # or let it auto-detect and monitor ALL active interfaces:
     sudo python3 hybrid_detect.py --mode live --artifacts-dir models/artifacts
+
+    # disable the dashboard entirely:
+    sudo python3 hybrid_detect.py --mode live --no-dashboard --artifacts-dir models/artifacts
 """
 
 import argparse
 import sys
+import threading
 from pathlib import Path
 
 from models.dependency_manager import ensure_dependencies
@@ -66,10 +71,13 @@ def parse_args():
     # batch mode
     p.add_argument("--input", type=str, help="[batch] Path to a raw (unscaled) flow feature CSV")
     p.add_argument("--out", type=str, default=None, help="[batch] Where to write the detection results CSV")
+    p.add_argument("--csv-chunksize", type=int, default=200_000,
+                    help="[batch] Rows per chunk when streaming large input files (lower if you hit memory pressure)")
 
     # live mode
     p.add_argument("--interface", type=str, default=None,
-                    help="[live] NIC to capture on (default: auto-detect first active NIC)")
+                    help="[live] Comma-separated NIC(s) to capture on, e.g. 'enp0s3,enp0s8' "
+                         "(default: auto-detect and monitor ALL active NICs)")
     p.add_argument("--local-ips", type=str, default=None,
                     help="[live] Comma-separated local IPs for this host (default: auto-detected from --interface)")
     p.add_argument("--bpf", type=str, default=None, help="[live] BPF filter, e.g. 'tcp or udp'")
@@ -90,6 +98,13 @@ def parse_args():
     # alerting
     p.add_argument("--no-alerts", action="store_true", help="Disable Telegram alerting entirely (local log only)")
 
+    # dashboard
+    p.add_argument("--no-dashboard", action="store_true",
+                    help="[live] Disable the live web dashboard (on by default in live mode)")
+    p.add_argument("--dashboard-host", type=str, default="0.0.0.0",
+                    help="[live] Dashboard bind address (default: all interfaces)")
+    p.add_argument("--dashboard-port", type=int, default=8080, help="[live] Dashboard port")
+
     return p.parse_args()
 
 
@@ -102,12 +117,25 @@ def main():
     if not args.no_alerts:
         alert_manager = AlertManager(AlertConfig())
 
+    event_bus = None
+    if args.mode == "live" and not args.no_dashboard:
+        from dashboard.event_bus import EventBus
+        from dashboard.app import run_dashboard
+        event_bus = EventBus()
+        dashboard_thread = threading.Thread(
+            target=run_dashboard,
+            kwargs={"event_bus": event_bus, "host": args.dashboard_host, "port": args.dashboard_port},
+            daemon=True,
+        )
+        dashboard_thread.start()
+
     detector = HybridNIDS(
         processor=processor, xgb_model=xgb_model, autoencoder=autoencoder,
         benign_label=args.benign_label,
         xgb_confidence_threshold=args.xgb_confidence_threshold,
         high_confidence_threshold=args.high_confidence_threshold,
         alert_manager=alert_manager,
+        event_bus=event_bus,
     )
 
     try:
@@ -125,47 +153,61 @@ def run_batch(detector, args):
         print("[!] --input is required for --mode batch", file=sys.stderr)
         sys.exit(1)
 
-    raw_df = pd.read_csv(args.input)
-    # Column names go through the same whitespace-stripping / identity-
-    # column normalization used at training time (extract_features.py's
-    # CSV loader), so a CICIDS-formatted input lines up with what the
-    # processor was actually fit on. Harmless no-op for already-clean
-    # column names (e.g. from your own pcap pipeline).
-    raw_df = _normalize_cicids_columns(raw_df)
-    print(f"[*] Loaded {len(raw_df)} raw flow rows from {args.input}")
+    out_path = args.out or (Path(args.input).with_suffix("").as_posix() + "_detections.csv")
+    Path(out_path).parent.mkdir(parents=True, exist_ok=True)
 
-    results = detector.process_and_alert(raw_df)
-    if results.empty:
+    total_counts = {}
+    n_total = 0
+    first_chunk = True
+
+    # Stream the file in bounded chunks rather than loading it whole --
+    # on a multi-million-row file, holding the raw data AND the scaled
+    # features AND both models' outputs in memory simultaneously (as a
+    # single big pd.read_csv() forces) is what caused the earlier OOM
+    # kill during training too. Peak memory here stays O(chunksize)
+    # regardless of total file size.
+    for raw_chunk in pd.read_csv(args.input, chunksize=args.csv_chunksize, low_memory=False):
+        raw_chunk = _normalize_cicids_columns(raw_chunk)
+        n_total += len(raw_chunk)
+
+        results = detector.process_and_alert(raw_chunk)
+        if results.empty:
+            print(f"[*] Processed {n_total} rows so far (0 survived processing in this chunk)")
+            continue
+
+        for verdict, count in results["verdict"].value_counts().items():
+            total_counts[verdict] = total_counts.get(verdict, 0) + int(count)
+
+        results.to_csv(out_path, mode="w" if first_chunk else "a", header=first_chunk, index=False)
+        first_chunk = False
+        print(f"[*] Processed {n_total} rows so far -- {dict(total_counts)}")
+
+    if not total_counts:
         print("[!] No flows survived processing -- nothing to report.")
         return
 
-    counts = results["verdict"].value_counts()
     print("\n[*] Detection summary:")
-    for verdict, count in counts.items():
+    for verdict, count in total_counts.items():
         print(f"    {verdict}: {count}")
-
-    out_path = args.out or (Path(args.input).with_suffix("").as_posix() + "_detections.csv")
-    Path(out_path).parent.mkdir(parents=True, exist_ok=True)
-    results.to_csv(out_path, index=False)
     print(f"\n[*] Full results -> {out_path}")
 
 
 def run_live(detector, args):
     require_root_or_cap()
 
-    interface = args.interface
-    if not interface:
-        active = get_active_interfaces()
-        if not active:
+    if args.interface:
+        interfaces = [i.strip() for i in args.interface.split(",") if i.strip()]
+    else:
+        interfaces = get_active_interfaces()
+        if not interfaces:
             print("[!] No active interfaces found and none specified with --interface.", file=sys.stderr)
             sys.exit(1)
-        interface = active[0]
-        print(f"[*] No --interface given, auto-selected: {interface}")
+        print(f"[*] No --interface given, auto-selected ALL active NICs: {interfaces}")
 
-    local_ips = args.local_ips.split(",") if args.local_ips else _infer_local_ips(interface)
+    local_ips = args.local_ips.split(",") if args.local_ips else _infer_local_ips(interfaces)
 
     detector.run_live(
-        interface=interface,
+        interface=interfaces,
         local_ips=local_ips,
         bpf_filter=args.bpf,
         idle_timeout=args.idle_timeout,
@@ -175,12 +217,16 @@ def run_live(detector, args):
     )
 
 
-def _infer_local_ips(interface):
+def _infer_local_ips(interfaces):
     import psutil
-    addrs = psutil.net_if_addrs().get(interface, [])
-    ips = [a.address for a in addrs if a.family.name == "AF_INET"]
+    all_addrs = psutil.net_if_addrs()
+    ips = []
+    for iface in interfaces:
+        for a in all_addrs.get(iface, []):
+            if a.family.name == "AF_INET":
+                ips.append(a.address)
     if ips:
-        print(f"[*] Auto-detected local IP(s) for {interface}: {ips}")
+        print(f"[*] Auto-detected local IP(s) across {interfaces}: {ips}")
     return ips or None
 
 

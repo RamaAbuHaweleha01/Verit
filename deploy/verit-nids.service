@@ -1,0 +1,50 @@
+[Unit]
+Description=Verit NIDS - Hybrid Detection Engine
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=verit
+Group=verit
+WorkingDirectory=/home/verit/Verit
+
+# --interface lists both monitored NICs explicitly (rather than relying on
+# auto-detection order in a non-interactive service context). Adjust the
+# interface names, artifacts-dir, and flush-interval to taste.
+ExecStart=/home/verit/Verit/venv/bin/python3 /home/verit/Verit/hybrid_detect.py \
+    --mode live \
+    --interface enp0s3,enp0s8 \
+    --artifacts-dir models/artifacts \
+    --flush-interval 15
+
+# Raw sockets (what scapy's sniff() needs) require CAP_NET_RAW; some
+# capture setups also want CAP_NET_ADMIN (e.g. promiscuous mode). Ambient
+# capabilities grant exactly these two to THIS service's process even
+# though it runs as a non-root user -- no `sudo`, no setcap on the venv's
+# python3 binary (which would risk granting the capability system-wide if
+# that binary happens to be a symlink to the system interpreter).
+AmbientCapabilities=CAP_NET_RAW CAP_NET_ADMIN
+CapabilityBoundingSet=CAP_NET_RAW CAP_NET_ADMIN
+NoNewPrivileges=true
+
+# Auto-restart on crash, but not in a tight loop if something's
+# persistently broken (e.g. bad artifacts path).
+Restart=on-failure
+RestartSec=10s
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+# `systemctl stop` sends SIGTERM -- hybrid_detector.py's run_live() catches
+# this and flushes any still-open flows before exiting cleanly. Give it
+# real time to do that rather than letting systemd escalate to SIGKILL
+# mid-flush.
+TimeoutStopSec=30s
+KillSignal=SIGTERM
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=verit-nids
+
+[Install]
+WantedBy=multi-user.target

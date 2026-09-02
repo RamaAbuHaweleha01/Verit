@@ -130,6 +130,7 @@ class AlertManager:
 
     @staticmethod
     def _build_record(flow, verdict, source, severity, score, extra):
+        base_keys = {"src_ip", "dst_ip", "src_port", "dst_port", "protocol"}
         record = {
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "severity": severity,
@@ -142,12 +143,17 @@ class AlertManager:
             "dst_port": flow.get("dst_port"),
             "protocol": flow.get("protocol"),
         }
-        # carry through any extra flow stats the caller has available,
-        # without hardcoding the full flow-feature schema here
-        for key in ("flow_duration", "total_fwd_packets", "total_bwd_packets",
-                    "total_fwd_bytes", "total_bwd_bytes", "flow_id"):
-            if key in flow:
-                record[key] = flow[key]
+        # Carry through EVERY other field the caller supplied in `flow`
+        # (flow stats, flag counts, whatever) rather than a hardcoded
+        # column-name list -- that list previously went stale silently
+        # when the upstream feature schema changed names, and every
+        # alert quietly lost its context fields without erroring.
+        # Internal bookkeeping columns (verdict/source/severity/score,
+        # already recorded above) are skipped to avoid duplicating them.
+        skip_keys = base_keys | {"verdict", "source", "severity", "score"}
+        for key, value in flow.items():
+            if key not in skip_keys and key not in record:
+                record[key] = value
         if extra:
             record.update(extra)
         return record
@@ -189,13 +195,16 @@ class AlertManager:
         if record.get("protocol") is not None:
             lines.append(f"<b>Protocol:</b> {esc(record['protocol'])}")
 
-        for label, key in [
-            ("Flow duration", "flow_duration"), ("Fwd packets", "total_fwd_packets"),
-            ("Bwd packets", "total_bwd_packets"), ("Fwd bytes", "total_fwd_bytes"),
-            ("Bwd bytes", "total_bwd_bytes"),
-        ]:
-            if key in record:
-                lines.append(f"<b>{label}:</b> {esc(record[key])}")
+        # Show whatever extra context fields came through with this
+        # record (flow stats, flag counts, etc.) -- generic rather than a
+        # hardcoded column list, so this can't go silently stale again if
+        # the upstream feature schema's column names change.
+        skip = {"timestamp", "severity", "verdict", "source", "score",
+                "src_ip", "dst_ip", "src_port", "dst_port", "protocol"}
+        for key, value in record.items():
+            if key in skip or value is None:
+                continue
+            lines.append(f"<b>{esc(key)}:</b> {esc(value)}")
 
         lines.append("")
         lines.append(f"<i>{esc(record['timestamp'])}</i>")

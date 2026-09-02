@@ -44,6 +44,15 @@ _LLDP_ETHERTYPE = 0x88CC
 _IGMP_PROTO_NUM = 2       # IP protocol number for IGMP
 _DHCP_PORTS = {67, 68}    # BOOTP/DHCP
 
+# Local-network service-discovery chatter (mDNS/Bonjour, SSDP/UPnP) --
+# constant background noise on any LAN with phones, smart-TVs, printers,
+# Chromecasts, etc. Almost never present in a curated lab dataset like
+# CICIDS2017, so a model trained on that data has never seen it and will
+# reliably flag it as anomalous even though it's completely mundane.
+# Filtered here for the same reason ARP/DHCP/LLDP are: it's discovery
+# noise, not host-to-host traffic worth building a flow around.
+_DISCOVERY_PORTS = {5353, 1900}  # mDNS, SSDP
+
 
 @dataclass
 class CleaningStats:
@@ -103,6 +112,7 @@ class PacketCleaner:
         drop_out_of_order=True,
         drop_l2_noise=True,
         drop_dhcp=True,
+        drop_discovery=True,                     # mDNS/SSDP -- see _DISCOVERY_PORTS
         dedup_window=4096,                       # how many recent packet hashes to remember
     ):
         self.validate_checksums = validate_checksums
@@ -112,6 +122,7 @@ class PacketCleaner:
         self.drop_out_of_order = drop_out_of_order
         self.drop_l2_noise = drop_l2_noise
         self.drop_dhcp = drop_dhcp
+        self.drop_discovery = drop_discovery
 
         self.stats = CleaningStats()
         self._dedup_hashes = set()
@@ -205,6 +216,9 @@ class PacketCleaner:
             return True
         if self.drop_dhcp and UDP in pkt:
             if pkt[UDP].sport in _DHCP_PORTS or pkt[UDP].dport in _DHCP_PORTS:
+                return True
+        if self.drop_discovery and UDP in pkt:
+            if pkt[UDP].sport in _DISCOVERY_PORTS or pkt[UDP].dport in _DISCOVERY_PORTS:
                 return True
         return False
 

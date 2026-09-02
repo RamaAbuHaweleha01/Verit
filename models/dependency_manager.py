@@ -25,6 +25,7 @@ REQUIRED_PACKAGES = {
     "matplotlib": "matplotlib>=3.7.0",
     "xgboost": "xgboost>=2.0.0",
     "tensorflow": "tensorflow>=2.15.0",
+    "flask": "flask>=3.0.0",
 }
 
 
