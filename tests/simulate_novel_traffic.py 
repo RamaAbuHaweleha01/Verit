@@ -1,0 +1,102 @@
+#!/usr/bin/env python3
+"""
+Verit NIDS - Novel Traffic Simulator (for testing zero-day detection)
+------------------------------------------------------------------
+Everything in extract_features.py's training data (CICIDS2017) and every
+common attack tool (nmap, hydra, hping3, slowloris...) produces traffic
+that either matches a class the XGBoost classifier was explicitly trained
+on, or is close enough to normal web/SSH/FTP traffic in shape. To actually
+exercise the AUTOENCODER's zero-day path, you need traffic whose flow
+statistics don't resemble anything in that 2017 dataset -- benign or
+malicious.
+
+This sends a few synthetic patterns designed to be statistically unusual
+without being a real attack:
+
+    1. "beacon"   -- extremely regular, precisely-timed small packets
+                     (mimics C2 beaconing timing, but with harmless payload)
+    2. "burst"    -- a huge number of packets in a tiny time window, then
+                     total silence (not a flood -- a single very extreme
+                     flow shape)
+    3. "trickle"  -- one packet every few seconds for a long time, tiny
+                     payloads (very low rate, very long duration)
+
+None of these carry exploit payloads or actual malicious intent -- they're
+just traffic SHAPES the training data has never seen, which is exactly
+what should trip the autoencoder's reconstruction-error threshold rather
+than the XGBoost classifier (which should stay non-confident/BENIGN on
+all of these, since it correctly has no matching learned class either).
+
+Usage (run from the attacker VM, targeting the Verit VM's IP):
+    python3 simulate_novel_traffic.py --target 192.168.1.20 --pattern beacon
+    python3 simulate_novel_traffic.py --target 192.168.1.20 --pattern burst
+    python3 simulate_novel_traffic.py --target 192.168.1.20 --pattern trickle
+    python3 simulate_novel_traffic.py --target 192.168.1.20 --pattern all
+"""
+
+import argparse
+import socket
+import time
+
+
+def send_udp(target, port, payload, count, interval):
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    for i in range(count):
+        sock.sendto(payload, (target, port))
+        if interval > 0:
+            time.sleep(interval)
+    sock.close()
+
+
+def pattern_beacon(target, port=53535):
+    """~40-byte packets at an exact 2.000s interval for 60s -- a rhythm
+    with almost zero jitter, unlike any human-driven or normal service
+    traffic (which always has natural timing variance)."""
+    print(f"[*] beacon: sending 30 tightly-timed 40-byte UDP packets to {target}:{port}, 2s apart")
+    send_udp(target, port, b"B" * 40, count=30, interval=2.0)
+
+
+def pattern_burst(target, port=53536):
+    """A huge number of tiny packets as fast as the socket will allow,
+    all in well under a second, then nothing -- an extreme flow-volume
+    shape (huge packets/sec, near-zero duration) unlike typical bulk
+    transfer (which ramps/sustains) or typical floods (which sustain
+    over a long window)."""
+    print(f"[*] burst: sending 5000 tiny UDP packets to {target}:{port} as fast as possible")
+    send_udp(target, port, b"X" * 8, count=5000, interval=0)
+
+
+def pattern_trickle(target, port=53537):
+    """One 20-byte packet every 4 seconds for several minutes -- an
+    extremely low, extremely regular rate sustained over a long duration.
+    Very different from typical short bursty benign flows or typical
+    attack flows (which are either high-rate or short-lived)."""
+    print(f"[*] trickle: sending 40 tiny UDP packets to {target}:{port}, 4s apart (~2.5 min total)")
+    send_udp(target, port, b"T" * 20, count=40, interval=4.0)
+
+
+def main():
+    p = argparse.ArgumentParser(description="Send synthetic novel-shaped traffic for zero-day testing")
+    p.add_argument("--target", required=True, help="IP of the Verit VM being monitored")
+    p.add_argument("--pattern", choices=["beacon", "burst", "trickle", "all"], default="all")
+    args = p.parse_args()
+
+    patterns = {
+        "beacon": pattern_beacon,
+        "burst": pattern_burst,
+        "trickle": pattern_trickle,
+    }
+
+    to_run = patterns.keys() if args.pattern == "all" else [args.pattern]
+    for name in to_run:
+        patterns[name](args.target)
+        time.sleep(1)
+
+    print("\n[*] Done. Watch the Verit dashboard / logs -- these should show up as either "
+          "ZERO_DAY_SUSPECTED (source=autoencoder) or BENIGN, but should NOT be confidently "
+          "classified as any specific known attack type by XGBoost, since none of these "
+          "patterns match a real attack signature.")
+
+
+if __name__ == "__main__":
+    main()

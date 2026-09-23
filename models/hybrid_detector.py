@@ -10,15 +10,8 @@ Combines the two trained models into one verdict per flow:
     2. Otherwise (XGBoost says BENIGN, or isn't confident), the
        autoencoder gets a look. If the flow reconstructs poorly (error
        above its threshold, calibrated on benign validation data), it's
-       flagged ZERO_DAY_SUSPECTED -- something that doesn't look like
-       normal traffic, but doesn't match any known attack signature
-       either.
+       flagged ZERO_DAY_SUSPECTED.
     3. Otherwise: BENIGN.
-
-This is exactly the point of pairing a supervised and an unsupervised
-model -- XGBoost is precise but blind to anything it wasn't trained on;
-the autoencoder is comprehensive (trained only on "normal") but noisier
-and unable to name what it's seeing.
 """
 
 import signal
@@ -61,8 +54,21 @@ class HybridNIDS:
         # is published for the live web dashboard to display.
         self.event_bus = event_bus
         self._warned_missing_columns = False
+        self._alert_error_count = 0
 
-    # -- core combiner -------------------------------------------------------
+        # Unmissable at startup, on purpose: a silent alerting pipe is
+        # exactly the failure mode that's bitten this project before --
+        # dashboard working while zero alerts fire, with no error and
+        # no obvious cause. State it plainly every time this is constructed.
+        print("=" * 70)
+        print("[hybrid] Alerting:", "ENABLED (AlertManager attached)" if self.alerts
+              else "DISABLED -- no AlertManager was passed to HybridNIDS. "
+                   "No Telegram messages or log entries will be produced, "
+                   "regardless of what the dashboard shows.")
+        print("[hybrid] Dashboard event bus:", "ENABLED" if self.event_bus else "DISABLED")
+        print("=" * 70)
+
+    # -- core combiner -------------------------------------------------
 
     def predict_batch(self, raw_df: pd.DataFrame) -> pd.DataFrame:
         """raw_df: UNSCALED flow rows (identity columns + raw feature values),
@@ -91,11 +97,27 @@ class HybridNIDS:
         verdicts, sources, scores, severities = [], [], [], []
         for label, conf, anomaly, err in zip(xgb_labels, xgb_conf, ae_anomaly, ae_errors):
             if label != self.benign_label and conf >= self.xgb_confidence_threshold:
+                # confident known attack -- trust XGBoost
                 verdicts.append(label)
                 sources.append("xgboost")
                 scores.append(float(conf))
                 severities.append("CRITICAL" if conf >= self.high_confidence_threshold else "WARNING")
+            elif label == self.benign_label and conf >= self.xgb_confidence_threshold:
+                # confident BENIGN -- trust XGBoost here too, and STOP.
+                # Without this branch, a stale/miscalibrated autoencoder
+                # threshold could override even a well-supported BENIGN
+                # call from a classifier that scored 0.99+ F1 on exactly
+                # this class in evaluation -- turning ordinary traffic
+                # into a flood of false ZERO_DAY_SUSPECTED alerts. The
+                # autoencoder should only get the final say when XGBoost
+                # ISN'T confident either way (the next two branches).
+                verdicts.append(self.benign_label)
+                sources.append("xgboost")
+                scores.append(float(conf))
+                severities.append("INFO")
             elif anomaly:
+                # XGBoost wasn't confident in either direction -- now the
+                # autoencoder gets to flag genuinely unusual traffic
                 verdicts.append("ZERO_DAY_SUSPECTED")
                 sources.append("autoencoder")
                 scores.append(float(err))
@@ -131,25 +153,43 @@ class HybridNIDS:
             # every flow, including BENIGN -- the dashboard shows the full
             # traffic picture, not just alerts
             for _, row in results.iterrows():
-                self.event_bus.publish(row.to_dict())
+                try:
+                    self.event_bus.publish(row.to_dict())
+                except Exception as e:
+                    # the dashboard is a nice-to-have; it must never be able
+                    # to take down detection or alerting if it misbehaves
+                    print(f"[hybrid] WARNING: event_bus.publish() failed: {e}")
 
         if self.alerts is not None:
             for _, row in results.iterrows():
                 if row["verdict"] == self.benign_label:
                     continue  # INFO-level benign rows are noisy; skip unless you want full audit logging of every flow
                 flow = row.to_dict()
-                self.alerts.alert(
-                    flow=flow, verdict=row["verdict"], source=row["source"],
-                    severity=row["severity"], score=row["score"],
-                )
+                try:
+                    self.alerts.alert(
+                        flow=flow, verdict=row["verdict"], source=row["source"],
+                        severity=row["severity"], score=row["score"],
+                    )
+                except Exception as e:
+                    # A single bad alert (e.g. a Telegram/network hiccup that
+                    # somehow escaped the notifier's own retry handling, or an
+                    # unexpected field type) must NEVER be allowed to silently
+                    # swallow itself, and must NEVER be allowed to crash the
+                    # whole detection loop over one alert. Log it loudly
+                    # instead -- this is exactly the class of failure that
+                    # produced "dashboard works, zero alerts, zero errors
+                    # shown" with no way to tell what went wrong.
+                    self._alert_error_count += 1
+                    print(f"[hybrid] ERROR: alerts.alert() raised for verdict={row['verdict']} "
+                          f"src={row.get('src_ip')}: {type(e).__name__}: {e}")
+                    if self._alert_error_count in (1, 10, 100) or self._alert_error_count % 1000 == 0:
+                        print(f"[hybrid] Total alert failures so far this run: {self._alert_error_count}")
         return results
 
     def _warn_if_schema_mismatch(self, raw_df):
         if self._warned_missing_columns:
             return
         expected = set(self.processor.feature_columns_)
-        # account for the onehot-expanded protocol_* columns, which won't
-        # exist in raw_df under those exact names
         raw_cols = set(raw_df.columns)
         onehot_bases = set(self.processor.onehot_categories_.keys())
         missing = [
@@ -159,9 +199,7 @@ class HybridNIDS:
         if missing:
             print(f"[hybrid_detect] WARNING: {len(missing)}/{len(expected)} features the model "
                   f"was trained on are missing from this input and will be zero-filled "
-                  f"(e.g. {missing[:5]}). This will degrade detection accuracy -- the live "
-                  f"capture pipeline's feature set doesn't yet match what the model was "
-                  f"trained on. Resolve this before trusting live results.")
+                  f"(e.g. {missing[:5]}). This will degrade detection accuracy.")
             self._warned_missing_columns = True
 
     # -- live capture loop -------------------------------------------------
@@ -175,9 +213,7 @@ class HybridNIDS:
         detector + alert manager every `flush_interval` seconds. Blocks
         until Ctrl+C (SIGINT) or a service stop (SIGTERM); both trigger
         the same graceful shutdown: flush whatever's still open, score it,
-        and exit cleanly -- important under systemd, which sends SIGTERM
-        on `systemctl stop` and escalates to SIGKILL if the process
-        doesn't exit within its configured timeout."""
+        and exit cleanly."""
         interfaces = [interface] if isinstance(interface, str) else list(interface)
 
         cleaner = PacketCleaner(
@@ -194,10 +230,6 @@ class HybridNIDS:
             print(f"\n[*] Received {name}, shutting down gracefully...")
             shutdown["requested"] = True
 
-        # SIGTERM must be handled explicitly -- unlike SIGINT, Python does
-        # NOT turn it into a catchable KeyboardInterrupt by default, so
-        # without this a systemd `stop` would just kill the process mid-
-        # capture with no flush and no clean log line.
         prev_sigterm = signal.signal(signal.SIGTERM, _handle_shutdown_signal)
         prev_sigint = signal.signal(signal.SIGINT, _handle_shutdown_signal)
 
@@ -234,13 +266,11 @@ class HybridNIDS:
                     results = self.process_and_alert(remaining)
                     self._print_live_summary(results)
                 print(cleaner.stats.summary())
+                if self._alert_error_count:
+                    print(f"[*] WARNING: {self._alert_error_count} alert(s) failed to send/log "
+                          f"during this run -- see [hybrid] ERROR lines above for details.")
                 print("[*] Live detection stopped.")
         except KeyboardInterrupt:
-            # Belt-and-suspenders: normally SIGINT is intercepted by the
-            # handler installed above and never reaches here as an actual
-            # exception. This just guarantees a clean exit (not a
-            # traceback) even in an unusual embedding/testing context
-            # where a raw KeyboardInterrupt reaches this frame directly.
             pass
 
     @staticmethod

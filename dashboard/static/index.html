@@ -47,23 +47,9 @@
     gap: 10px;
   }
 
-  header .brand {
-    display: flex;
-    align-items: baseline;
-    gap: 10px;
-  }
-
-  header h1 {
-    font-size: 18px;
-    font-weight: 600;
-    margin: 0;
-    letter-spacing: -0.01em;
-  }
-
-  header .subtitle {
-    color: var(--ink-dim);
-    font-size: 13px;
-  }
+  header .brand { display: flex; align-items: baseline; gap: 10px; }
+  header h1 { font-size: 18px; font-weight: 600; margin: 0; letter-spacing: -0.01em; }
+  header .subtitle { color: var(--ink-dim); font-size: 13px; }
 
   .status-line {
     display: flex;
@@ -85,14 +71,11 @@
     top: -1px;
   }
 
-  .status-line .dot.live {
-    background: var(--blue);
-    box-shadow: 0 0 0 3px var(--blue-dim);
-  }
+  .status-line .dot.live { background: var(--blue); box-shadow: 0 0 0 3px var(--blue-dim); }
 
   main {
     padding: 20px 24px 40px;
-    max-width: 1280px;
+    max-width: 1360px;
     margin: 0 auto;
   }
 
@@ -105,55 +88,90 @@
     margin-bottom: 20px;
   }
 
-  .meter {
-    background: var(--panel);
-    padding: 14px 16px;
-  }
-
-  .meter .label {
-    font-size: 12px;
-    color: var(--ink-dim);
-    margin-bottom: 8px;
-  }
-
-  .meter .value {
-    font-family: var(--mono);
-    font-size: 28px;
-    font-weight: 500;
-    line-height: 1;
-  }
-
+  .meter { background: var(--panel); padding: 14px 16px; }
+  .meter .label { font-size: 12px; color: var(--ink-dim); margin-bottom: 8px; }
+  .meter .value { font-family: var(--mono); font-size: 28px; font-weight: 500; line-height: 1; }
   .meter.benign .value { color: var(--blue); }
   .meter.attack .value { color: var(--amber); }
   .meter.zeroday .value { color: var(--red); }
 
-  section {
-    margin-bottom: 22px;
-  }
+  section { margin-bottom: 22px; }
 
   section > h2 {
     font-size: 12.5px;
     font-weight: 500;
     color: var(--ink-dim);
     margin: 0 0 8px 2px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
   }
 
-  .panel {
-    background: var(--panel);
-    border: 1px solid var(--line-strong);
+  section > h2 .count { font-family: var(--mono); font-weight: 400; }
+
+  .panel { background: var(--panel); border: 1px solid var(--line-strong); }
+  .chart-panel { padding: 14px 16px 10px; height: 180px; }
+
+  .filter-bar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    gap: 12px;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--line-strong);
   }
 
-  .chart-panel {
-    padding: 14px 16px 10px;
-    height: 180px;
-  }
+  .filter-field { display: flex; flex-direction: column; gap: 4px; }
+  .filter-field label { font-size: 11px; color: var(--ink-dim); }
 
-  table {
-    width: 100%;
-    border-collapse: collapse;
+  .filter-field input, .filter-field select {
     font-family: var(--mono);
-    font-size: 12.5px;
+    font-size: 13px;
+    padding: 6px 8px;
+    border: 1px solid var(--line-strong);
+    background: #fff;
+    color: var(--ink);
+    border-radius: 2px;
+    min-width: 130px;
   }
+
+  .filter-field input:focus, .filter-field select:focus {
+    outline: none;
+    border-color: var(--blue);
+  }
+
+  .filter-field.narrow input { min-width: 90px; }
+
+  .filter-buttons { display: flex; gap: 8px; margin-left: auto; }
+
+  button.btn {
+    font-family: var(--sans);
+    font-size: 13px;
+    font-weight: 500;
+    padding: 7px 14px;
+    border: 1px solid var(--line-strong);
+    background: #fff;
+    color: var(--ink);
+    border-radius: 2px;
+    cursor: pointer;
+  }
+
+  button.btn:hover { background: #eceef1; }
+  button.btn.primary { background: var(--blue); color: #fff; border-color: var(--blue); }
+  button.btn.primary:hover { background: #235a92; }
+
+  .search-status {
+    padding: 8px 16px;
+    font-size: 12.5px;
+    color: var(--ink-dim);
+    border-bottom: 1px solid var(--line);
+    display: none;
+  }
+
+  .search-status.active { display: block; }
+  .search-status a { color: var(--blue); cursor: pointer; text-decoration: underline; }
+
+  table { width: 100%; border-collapse: collapse; font-family: var(--mono); font-size: 12.5px; }
 
   thead th {
     text-align: left;
@@ -166,27 +184,14 @@
     position: sticky;
     top: 0;
     background: var(--panel);
-  }
-
-  tbody td {
-    padding: 6px 12px;
-    border-bottom: 1px solid var(--line);
     white-space: nowrap;
   }
 
-  tbody tr {
-    transition: background-color 1.2s ease;
-  }
+  tbody td { padding: 6px 12px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+  tbody tr { transition: background-color 1.2s ease; }
+  tbody tr.flash { background-color: var(--blue-dim); transition: background-color 0s; }
 
-  tbody tr.flash {
-    background-color: var(--blue-dim);
-    transition: background-color 0s;
-  }
-
-  .table-scroll {
-    max-height: 460px;
-    overflow-y: auto;
-  }
+  .table-scroll { max-height: 520px; overflow-y: auto; overflow-x: auto; }
 
   .badge {
     display: inline-block;
@@ -201,20 +206,15 @@
   .badge.attack { color: #7a4a06; background: var(--amber-dim); border-color: #e0c088; }
   .badge.zeroday { color: #7a1a15; background: var(--red-dim); border-color: #e0b0ab; }
 
-  .empty-state {
-    padding: 40px 20px;
-    text-align: center;
-    color: var(--ink-dim);
-    font-size: 13px;
-  }
+  .empty-state { padding: 40px 20px; text-align: center; color: var(--ink-dim); font-size: 13px; }
 
-  ::-webkit-scrollbar { width: 10px; }
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
   ::-webkit-scrollbar-track { background: var(--panel); }
   ::-webkit-scrollbar-thumb { background: var(--line-strong); }
 
   @media (max-width: 700px) {
     .meters { grid-template-columns: repeat(2, 1fr); }
-    .table-scroll { overflow-x: auto; }
+    .filter-buttons { margin-left: 0; width: 100%; }
   }
 </style>
 </head>
@@ -228,6 +228,7 @@
   <div class="status-line">
     <span><span class="dot" id="connDot"></span><span id="connLabel">Connecting…</span></span>
     <span id="uptimeLabel">Uptime —</span>
+    <span id="bufferLabel">—</span>
     <span id="clientsLabel">—</span>
   </div>
 </header>
@@ -260,8 +261,40 @@
   </section>
 
   <section>
-    <h2>Flow log</h2>
+    <h2>Flow log <span class="count" id="rowCountLabel"></span></h2>
     <div class="panel">
+      <div class="filter-bar">
+        <div class="filter-field">
+          <label for="fSrcIp">Source IP</label>
+          <input type="text" id="fSrcIp" placeholder="e.g. 192.168.1">
+        </div>
+        <div class="filter-field">
+          <label for="fDstIp">Destination IP</label>
+          <input type="text" id="fDstIp" placeholder="e.g. 10.0.0.4">
+        </div>
+        <div class="filter-field narrow">
+          <label for="fSrcPort">Source port</label>
+          <input type="number" id="fSrcPort" placeholder="any" min="0" max="65535">
+        </div>
+        <div class="filter-field narrow">
+          <label for="fDstPort">Destination port</label>
+          <input type="number" id="fDstPort" placeholder="any" min="0" max="65535">
+        </div>
+        <div class="filter-field">
+          <label for="fVerdict">Verdict</label>
+          <select id="fVerdict">
+            <option value="">All</option>
+            <option value="BENIGN">Benign</option>
+            <option value="ZERO_DAY_SUSPECTED">Zero-day suspected</option>
+            <option value="__attack__">Known attack (any type)</option>
+          </select>
+        </div>
+        <div class="filter-buttons">
+          <button class="btn" id="btnClear">Clear</button>
+          <button class="btn primary" id="btnSearchHistory">Search full history</button>
+        </div>
+      </div>
+      <div class="search-status" id="searchStatus"></div>
       <div class="table-scroll" id="tableScroll">
         <table>
           <thead>
@@ -273,6 +306,9 @@
               <th>Verdict</th>
               <th>Model</th>
               <th>Score</th>
+              <th>Duration</th>
+              <th>Fwd pkts</th>
+              <th>Bwd pkts</th>
             </tr>
           </thead>
           <tbody id="flowBody"></tbody>
@@ -285,6 +321,8 @@
 
 <script>
 const PROTO_NAMES = { 6: "TCP", 17: "UDP", 1: "ICMP" };
+const MAX_BUFFER = 4000;   // rows kept in browser memory for instant client-side filtering
+const MAX_DISPLAY = 300;   // rows actually rendered to the DOM at once
 
 function verdictClass(verdict) {
   if (verdict === "BENIGN") return "benign";
@@ -293,8 +331,7 @@ function verdictClass(verdict) {
 }
 
 function fmtTime(epochSeconds) {
-  const d = new Date(epochSeconds * 1000);
-  return d.toLocaleTimeString([], { hour12: false });
+  return new Date(epochSeconds * 1000).toLocaleTimeString([], { hour12: false });
 }
 
 function fmtUptime(seconds) {
@@ -309,18 +346,62 @@ function fmtScore(row) {
   return Number(row.score).toFixed(3);
 }
 
+// Flow Duration is in MICROSECONDS (matches CICFlowMeter/CICIDS2017 convention)
+function fmtDuration(row) {
+  const us = row["Flow Duration"];
+  if (us === null || us === undefined) return "—";
+  const seconds = us / 1_000_000;
+  return seconds < 1 ? `${Math.round(seconds * 1000)}ms` : `${seconds.toFixed(2)}s`;
+}
+
+function fmtCount(v) {
+  return (v === null || v === undefined) ? "—" : v;
+}
+
 function addressCell(ip, port) {
   if (ip === null || ip === undefined) return "—";
-  return port !== null && port !== undefined ? `${ip}:${port}` : ip;
+  return (port !== null && port !== undefined) ? `${ip}:${port}` : ip;
 }
+
+// -- state --
+let allRows = [];           // bounded buffer of everything seen/loaded, newest first
+let pendingRows = [];       // events arrived over SSE since the last render pass
+let historyMode = false;    // true = showing a /api/search snapshot instead of the live buffer
 
 const flowBody = document.getElementById("flowBody");
 const emptyState = document.getElementById("emptyState");
-const tableScroll = document.getElementById("tableScroll");
-const MAX_ROWS = 150;
+const rowCountLabel = document.getElementById("rowCountLabel");
+const searchStatus = document.getElementById("searchStatus");
 
-function prependRow(row, animate) {
-  emptyState.style.display = "none";
+function currentFilter() {
+  const verdict = document.getElementById("fVerdict").value;
+  return {
+    srcIp: document.getElementById("fSrcIp").value.trim(),
+    dstIp: document.getElementById("fDstIp").value.trim(),
+    srcPort: document.getElementById("fSrcPort").value.trim(),
+    dstPort: document.getElementById("fDstPort").value.trim(),
+    verdict,
+  };
+}
+
+function filterIsActive(f) {
+  return !!(f.srcIp || f.dstIp || f.srcPort || f.dstPort || f.verdict);
+}
+
+function matchesFilter(row, f) {
+  if (f.srcIp && !String(row.src_ip || "").includes(f.srcIp)) return false;
+  if (f.dstIp && !String(row.dst_ip || "").includes(f.dstIp)) return false;
+  if (f.srcPort && String(row.src_port) !== f.srcPort) return false;
+  if (f.dstPort && String(row.dst_port) !== f.dstPort) return false;
+  if (f.verdict === "__attack__") {
+    if (row.verdict === "BENIGN" || row.verdict === "ZERO_DAY_SUSPECTED") return false;
+  } else if (f.verdict && row.verdict !== f.verdict) {
+    return false;
+  }
+  return true;
+}
+
+function buildRow(row) {
   const tr = document.createElement("tr");
   const vClass = verdictClass(row.verdict);
   const proto = PROTO_NAMES[row.protocol] || (row.protocol ?? "—");
@@ -332,20 +413,80 @@ function prependRow(row, animate) {
     <td><span class="badge ${vClass}">${row.verdict ?? "—"}</span></td>
     <td>${row.source ?? "—"}</td>
     <td>${fmtScore(row)}</td>
+    <td>${fmtDuration(row)}</td>
+    <td>${fmtCount(row["Total Fwd Packets"])}</td>
+    <td>${fmtCount(row["Total Backward Packets"])}</td>
   `;
-  if (animate) tr.classList.add("flash");
-  flowBody.insertBefore(tr, flowBody.firstChild);
-  while (flowBody.children.length > MAX_ROWS) {
-    flowBody.removeChild(flowBody.lastChild);
-  }
-  if (animate) {
-    requestAnimationFrame(() => requestAnimationFrame(() => tr.classList.remove("flash")));
+  return tr;
+}
+
+function renderTable(flashNewest) {
+  const f = currentFilter();
+  const filtered = filterIsActive(f) ? allRows.filter(r => matchesFilter(r, f)) : allRows;
+
+  flowBody.innerHTML = "";
+  const toShow = filtered.slice(0, MAX_DISPLAY);
+  toShow.forEach((row, idx) => {
+    const tr = buildRow(row);
+    if (flashNewest && idx < flashNewest) tr.classList.add("flash");
+    flowBody.appendChild(tr);
+  });
+
+  emptyState.style.display = toShow.length ? "none" : "block";
+
+  const shownCount = toShow.length;
+  const totalMatching = filtered.length;
+  rowCountLabel.textContent = filterIsActive(f)
+    ? `— showing ${shownCount} of ${totalMatching} matching`
+    : `— showing ${shownCount} of ${allRows.length} buffered`;
+
+  if (flashNewest) {
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      flowBody.querySelectorAll("tr.flash").forEach(tr => tr.classList.remove("flash"));
+    }));
   }
 }
+
+// batch SSE arrivals and re-render at a fixed cadence, rather than on every
+// single message -- keeps the UI responsive even during a high flow rate
+function flushPending() {
+  if (!pendingRows.length || historyMode) {
+    pendingRows = [];
+    return;
+  }
+  const newCount = pendingRows.length;
+  allRows = pendingRows.concat(allRows).slice(0, MAX_BUFFER);
+  pendingRows = [];
+  renderTable(newCount);
+  bucketsRecordBatch();
+}
+setInterval(flushPending, 500);
 
 // -- rolling rate chart: bucket incoming events into 10s windows --
 const BUCKET_SECONDS = 10;
 const WINDOW_BUCKETS = 30; // 5 minutes
+let buckets = [];
+let chartQueue = [];
+
+function bucketsRecord(row) {
+  const t = Math.floor((row.received_at || Date.now() / 1000) / BUCKET_SECONDS) * BUCKET_SECONDS;
+  let bucket = buckets.find(b => b.t === t);
+  if (!bucket) {
+    bucket = { t, benign: 0, attack: 0, zeroday: 0 };
+    buckets.push(bucket);
+    buckets.sort((a, b) => a.t - b.t);
+    if (buckets.length > WINDOW_BUCKETS) buckets = buckets.slice(-WINDOW_BUCKETS);
+  }
+  const cls = verdictClass(row.verdict);
+  if (cls === "benign") bucket.benign++;
+  else if (cls === "zeroday") bucket.zeroday++;
+  else bucket.attack++;
+}
+
+function bucketsRecordBatch() {
+  chartQueue.forEach(bucketsRecord);
+  chartQueue = [];
+}
 
 const chartCtx = document.getElementById("rateChart").getContext("2d");
 const rateChart = new Chart(chartCtx, {
@@ -373,27 +514,6 @@ const rateChart = new Chart(chartCtx, {
   },
 });
 
-let buckets = []; // { t, benign, attack, zeroday }
-
-function currentBucketKey(epochSeconds) {
-  return Math.floor(epochSeconds / BUCKET_SECONDS) * BUCKET_SECONDS;
-}
-
-function recordInChart(row) {
-  const t = currentBucketKey(row.received_at || Date.now() / 1000);
-  let bucket = buckets.find(b => b.t === t);
-  if (!bucket) {
-    bucket = { t, benign: 0, attack: 0, zeroday: 0 };
-    buckets.push(bucket);
-    buckets.sort((a, b) => a.t - b.t);
-    if (buckets.length > WINDOW_BUCKETS) buckets = buckets.slice(-WINDOW_BUCKETS);
-  }
-  const cls = verdictClass(row.verdict);
-  if (cls === "benign") bucket.benign++;
-  else if (cls === "zeroday") bucket.zeroday++;
-  else bucket.attack++;
-}
-
 function redrawChart() {
   rateChart.data.labels = buckets.map(b => fmtTime(b.t));
   rateChart.data.datasets[0].data = buckets.map(b => b.benign);
@@ -410,20 +530,80 @@ function updateStats(stats) {
   document.getElementById("mAttack").textContent = stats.known_attacks ?? 0;
   document.getElementById("mZeroday").textContent = stats.zero_day ?? 0;
   document.getElementById("uptimeLabel").textContent = fmtUptime(stats.uptime_seconds ?? 0);
+  document.getElementById("bufferLabel").textContent = `${stats.history_buffered ?? 0} buffered server-side`;
   document.getElementById("clientsLabel").textContent =
     `${stats.connected_clients ?? 0} viewer${stats.connected_clients === 1 ? "" : "s"}`;
+}
+
+// -- filter bar wiring --
+["fSrcIp", "fDstIp", "fSrcPort", "fDstPort"].forEach(id => {
+  document.getElementById(id).addEventListener("input", () => renderTable());
+});
+document.getElementById("fVerdict").addEventListener("change", () => renderTable());
+
+document.getElementById("btnClear").addEventListener("click", () => {
+  ["fSrcIp", "fDstIp", "fSrcPort", "fDstPort"].forEach(id => document.getElementById(id).value = "");
+  document.getElementById("fVerdict").value = "";
+  exitHistoryMode();
+  renderTable();
+});
+
+document.getElementById("btnSearchHistory").addEventListener("click", async () => {
+  const f = currentFilter();
+  if (!filterIsActive(f)) {
+    searchStatus.textContent = "Set at least one filter above to search the full server-side history.";
+    searchStatus.classList.add("active");
+    return;
+  }
+  const params = new URLSearchParams();
+  if (f.srcIp) params.set("src_ip", f.srcIp);
+  if (f.dstIp) params.set("dst_ip", f.dstIp);
+  if (f.srcPort) params.set("src_port", f.srcPort);
+  if (f.dstPort) params.set("dst_port", f.dstPort);
+  if (f.verdict && f.verdict !== "__attack__") params.set("verdict", f.verdict);
+  params.set("limit", "500");
+
+  searchStatus.textContent = "Searching…";
+  searchStatus.classList.add("active");
+
+  try {
+    const res = await fetch(`/api/search?${params.toString()}`);
+    let results = await res.json();
+    if (f.verdict === "__attack__") {
+      results = results.filter(r => r.verdict !== "BENIGN" && r.verdict !== "ZERO_DAY_SUSPECTED");
+    }
+    results.reverse(); // newest first, matching the live view's ordering
+    historyMode = true;
+    allRows = results;
+    renderTable();
+    searchStatus.innerHTML = `Showing ${results.length} historical match(es) from the server's full buffer. ` +
+      `<a id="backToLive">Back to live view</a>`;
+    document.getElementById("backToLive").addEventListener("click", exitHistoryMode);
+  } catch (e) {
+    searchStatus.textContent = "Search failed — see console.";
+    console.error(e);
+  }
+});
+
+function exitHistoryMode() {
+  if (!historyMode) return;
+  historyMode = false;
+  searchStatus.classList.remove("active");
+  bootstrap();
 }
 
 // -- bootstrap: pull current state, then subscribe to the live stream --
 async function bootstrap() {
   try {
     const [statsRes, recentRes] = await Promise.all([
-      fetch("/api/stats"), fetch("/api/recent"),
+      fetch("/api/stats"), fetch(`/api/recent?limit=${MAX_BUFFER}`),
     ]);
     updateStats(await statsRes.json());
     const recent = await recentRes.json();
-    recent.forEach(row => { recordInChart(row); });
-    recent.slice(-MAX_ROWS).reverse().forEach(row => prependRow(row, false));
+    recent.reverse(); // server returns oldest-first; we render newest-first
+    allRows = recent;
+    recent.forEach(bucketsRecord);
+    renderTable();
     redrawChart();
   } catch (e) {
     console.error("Initial load failed", e);
@@ -435,22 +615,16 @@ function connectStream() {
   const label = document.getElementById("connLabel");
   const source = new EventSource("/api/stream");
 
-  source.onopen = () => {
-    dot.classList.add("live");
-    label.textContent = "Live";
-  };
-  source.onerror = () => {
-    dot.classList.remove("live");
-    label.textContent = "Reconnecting…";
-  };
+  source.onopen = () => { dot.classList.add("live"); label.textContent = "Live"; };
+  source.onerror = () => { dot.classList.remove("live"); label.textContent = "Reconnecting…"; };
   source.onmessage = (e) => {
     const row = JSON.parse(e.data);
-    prependRow(row, true);
-    recordInChart(row);
+    pendingRows.push(row);
+    chartQueue.push(row);
   };
 }
 
-let statsPollTimer = setInterval(async () => {
+setInterval(async () => {
   try { updateStats(await (await fetch("/api/stats")).json()); } catch (e) {}
 }, 4000);
 
